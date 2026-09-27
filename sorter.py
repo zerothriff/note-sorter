@@ -321,6 +321,11 @@ form{margin:0;display:inline}
 """
 
 
+# Delete is permanent, so ask first.
+DELETE_FORM = ('<form method="post" action="/delete" '
+               'onsubmit="return confirm(&quot;Delete this item for good? This cannot be undone.&quot;)"')
+
+
 def esc(s):
     return html.escape(str(s or ""), quote=True)
 
@@ -340,7 +345,7 @@ def render(tab):
     nav = "".join(
         f'<a class="{"on" if r["name"] == tab else ""}" href="/?tab={urllib.parse.quote(r["name"])}">'
         f'{esc(r["name"])}<span class="n">{r["n"] or ""}</span></a>' for r in shown)
-    nav += f'<a class="{"on" if tab == "__done" else ""}" href="/?tab=__done">Done</a>'
+    nav += f'<a class="{"on" if tab == "__done" else ""}" href="/?tab=__done">Archived</a>'
 
     done_view = tab == "__done"
     items = (q("SELECT * FROM items WHERE done = 1 ORDER BY id DESC LIMIT 200") if done_view else
@@ -357,13 +362,16 @@ def render(tab):
                        f'<input type="hidden" name="back" value="{back}"><button>Restore</button></form>'
                        f'<form method="post" action="/delete"><input type="hidden" name="id" value="{it["id"]}">'
                        f'<input type="hidden" name="back" value="{back}"><button>Delete</button></form>')
+            actions = actions.replace('<form method="post" action="/delete"', DELETE_FORM)
         else:
             opts = "".join(f'<option{" selected" if t == tab else ""}>{esc(t)}</option>' for t in all_tabs)
             actions = (f'<form method="post" action="/move"><input type="hidden" name="id" value="{it["id"]}">'
                        f'<input type="hidden" name="back" value="{back}">'
                        f'<select name="tab" onchange="this.form.submit()">{opts}</select></form>'
                        f'<form method="post" action="/done"><input type="hidden" name="id" value="{it["id"]}">'
-                       f'<input type="hidden" name="back" value="{back}"><button>✓ Done</button></form>')
+                       f'<input type="hidden" name="back" value="{back}"><button>Archive</button></form>'
+                       f'{DELETE_FORM}><input type="hidden" name="id" value="{it["id"]}">'
+                       f'<input type="hidden" name="back" value="{back}"><button>Delete</button></form>')
         img = ""
         if it["thumb"]:
             full = f'/thumb/{urllib.parse.quote(it["thumb"])}'
