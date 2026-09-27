@@ -384,16 +384,13 @@ def esc(s):
     return html.escape(str(s or ""), quote=True)
 
 
-LINK_TEXT_MAX = 75   # long links are shortened on screen but still open in full
-
-
 def linkify(s):
+    """Shows each link as just its site name (e.g. bookshop.org), still clickable."""
     def short(m):
         url = m.group(0)
-        shown = html.unescape(url)
-        if len(shown) > LINK_TEXT_MAX:
-            shown = shown[:LINK_TEXT_MAX] + "…"
-        return f'<a href="{url}" target="_blank" rel="noopener" title="{url}">{esc(shown)}</a>'
+        host = urllib.parse.urlparse(html.unescape(url)).hostname or url
+        host = host.removeprefix("www.")
+        return f'<a href="{url}" target="_blank" rel="noopener" title="{url}">{esc(host)}</a>'
     return URL_RE.sub(short, esc(s))
 
 
