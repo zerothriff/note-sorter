@@ -26,7 +26,7 @@ WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8765"))
 POLL_SECONDS = 5
 SEND_REPLY = os.environ.get("SEND_REPLY", "1") == "1"   # "→ Books" confirmation
-STARTER_TABS = ["Music", "Books", "Movies & TV", "Links", "To-do", "Ideas", "Buy"]
+STARTER_TABS = ["To-Do","Recipes", "Music", "Books", "Movies & TV", "Links", "Ideas"]
 REPLY_PREFIX = "→ "
 
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
@@ -54,6 +54,12 @@ def init_db():
            tab TEXT, forced_tab TEXT, done INTEGER DEFAULT 0)""")
     for t in STARTER_TABS + ["Inbox"]:
         q("INSERT OR IGNORE INTO tabs VALUES (?, ?)", (t, time.time()))
+        q("UPDATE tabs SET name = ? WHERE name = ?", (t, t))   # fix capitalization
+        q("UPDATE items SET tab = ? WHERE tab = ? COLLATE NOCASE", (t, t))
+    keep = [t.lower() for t in STARTER_TABS + ["Inbox"]]
+    for t in tab_names():   # drop empty tabs that aren't in STARTER_TABS
+        if t.lower() not in keep and not q("SELECT 1 FROM items WHERE tab = ?", (t,), one=True):
+            q("DELETE FROM tabs WHERE name = ?", (t,))
 
 
 def tab_names():
