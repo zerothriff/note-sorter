@@ -1,0 +1,15 @@
+[Unit]
+Description=Note Sorter (Signal -> local LLM -> tabs)
+After=network-online.target
+
+[Service]
+# Who can open the viewer:
+#   127.0.0.1           -> only this computer (default)
+#   your Tailscale IP   -> your phone and other Tailscale devices (run: tailscale ip -4)
+Environment=WEB_HOST=127.0.0.1
+ExecStart=/usr/bin/python3 %h/note-sorter/sorter.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
