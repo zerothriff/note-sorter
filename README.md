@@ -1,33 +1,61 @@
 # Note Sorter
 
-Send yourself notes, links, songs, and other things through Signal's **Note to Self**. A local LLM running on your own GPU files each one into a tab, and a small web page shows the tabs so you can come back to them later.
+Send yourself notes, links, songs, books, screenshots, and anything else through Signal's **Note to Self**. A local LLM running on your own GPU files each item into a tab, and a web page, which you can add to your phone's home screen, shows your tabs as a grid of cards with pictures.
 
-Everything runs on your own machine. Nothing goes to a cloud service except Signal's end-to-end encrypted delivery.
+Everything runs on your own machine. There's no cloud service and no account besides Signal.
 
 ```
 Phone ──Signal "Note to Self"──▶ signal-cli (container)
                                         │
-                                  sorter.py ──▶ Ollama + Qwen (container, GPU)
+                                  sorter.py ──▶ Ollama + Qwen 3.5 (container, GPU)
                                         │
-                                   notes.db ──▶ web viewer at http://127.0.0.1:8765
+                           notes.db + thumbs/ ──▶ web viewer (port 8765, via Tailscale)
 ```
 
 ## How it works
 
-- Share anything to **Note to Self** in Signal. Adding a word or two, like `book rec` or `recipe`, helps a lot with sites such as Instagram that hide their content from non-logged-in visitors.
-- The sorter fetches the link's title when it can, then asks the local model which tab the item belongs in.
-- If nothing fits, the model can create a new short tab, such as "Recipes".
-- Start a message with `#tabname` to force a tab, for example `#books https://...`.
-- It replies in Note to Self with `→ Books`, or `→ Recipes (new tab)`, so you know it landed.
-- The model loads into VRAM only while sorting and unloads right after, so it doesn't hold GPU memory while you're gaming.
-- In the viewer, each item is a card. You can move it to another tab, mark it **✓ Done**, and rename or merge tabs.
+### Sending things
+
+- Share anything to **Note to Self** in Signal: a link, a note, a screenshot, a photo, or a link plus a comment.
+- Start a message with `#tabname` to put it in a specific tab, for example `#books https://...`.
+- The sorter replies in Note to Self with `→ Books`, or `→ Recipes (new tab)`, so you know it landed.
+
+### Sorting
+
+- The local model reads your text, the link's title and description, and any image, then picks a tab.
+- It reuses existing tabs whenever it reasonably can. If nothing fits, it creates one new short tab, such as "Recipes". If it truly can't tell, the item goes to **Inbox**.
+- Images you send go to the model too, so a screenshot of a book post can land in Books with no text at all.
+- The model loads into VRAM only while sorting, about a second per item, and unloads right after, so it doesn't hold GPU memory while you're gaming.
+
+### Pictures and titles
+
+Each card gets an image from the best source available, in this order:
+
+1. **An image you sent** (a screenshot or photo)
+2. **Signal's own link preview**, which the Signal app on your phone builds when you share a link
+3. **A book cover**, when the link contains an ISBN (bookstores, Amazon `/dp/` links). Title and cover come from [Open Library](https://openlibrary.org).
+4. **The site's preview image** (`og:image`)
+
+For titles, the sorter reads the page itself. If a site hides its content from normal requests, as Instagram does, it retries as a link-preview bot, the same way Signal and iMessage fetch previews. Images are downloaded once and stored locally in `thumbs/`, so the viewer never loads anything from the original sites.
+
+### The viewer
+
+- Tabs across the top, with a count of active items in each. Empty tabs are hidden.
+- Cards in a grid that fits your screen, with one column on a phone.
+- Links show as just the site name, like **bookshop.org**, and open the full link when tapped.
+- On each card:
+  - **Tab dropdown** moves it to another tab.
+  - **Archive** hides it in the **Archived** tab, where you can restore it.
+  - **Delete** removes it and its image permanently, after asking you to confirm.
+- **Rename or merge** at the bottom of each tab renames it, or moves all its items into another tab.
 
 ## Requirements
 
 - Linux with **Podman**. Written and tested on Bazzite with an NVIDIA RTX 4080. Docker should also work with the same commands.
-- An NVIDIA GPU with the container toolkit set up (CDI). Around 6–8 GB of free VRAM is plenty.
+- An NVIDIA GPU with the container toolkit set up (CDI). About 6–8 GB of free VRAM is plenty.
 - **Python 3.9+**. The script uses only the standard library, so there's nothing to `pip install`.
 - A Signal account on your phone.
+- **Optional:** [Tailscale](https://tailscale.com), to open the viewer from your phone.
 
 ## Setup
 
@@ -47,7 +75,7 @@ podman exec ollama nvidia-smi
 podman exec ollama ollama pull qwen3.5
 ```
 
-The first request after boot takes 30–60 seconds while the model loads. After that, sorting takes about 0.1 seconds.
+The first request after a boot takes 30–60 seconds while the model loads. After that, sorting takes about a second.
 
 ### 2. Signal (signal-cli REST API)
 
@@ -63,8 +91,6 @@ Link it to your Signal account the same way you'd link Signal Desktop:
 2. On your phone, open Signal, go to **Settings → Linked devices**, and scan the code.
 3. Confirm with `curl -s http://127.0.0.1:8080/v1/accounts`, which should print your number.
 
-> **Privacy note:** this links as an extra device, so the container receives all your Signal messages. The sorter ignores everything except Note to Self, and nothing leaves your machine, but be aware of it.
-
 ### 3. Start both containers at boot
 
 ```
@@ -73,15 +99,13 @@ podman update --restart=always signal-api
 systemctl --user enable podman-restart.service
 ```
 
-### 4. Run the sorter
+### 4. Get the code
 
 ```
-mkdir -p ~/note-sorter
-cp sorter.py ~/note-sorter/
-python3 ~/note-sorter/sorter.py
+git clone https://github.com/zerothriff/note-sorter.git ~/note-sorter
 ```
 
-Open `http://127.0.0.1:8765` and send something to Note to Self.
+To try it once by hand, run `python3 ~/note-sorter/sorter.py`, then open `http://127.0.0.1:8765` and send something to Note to Self. Stop it with Ctrl+C before moving on.
 
 ### 5. Run at boot
 
@@ -89,50 +113,69 @@ Install the included service file so the sorter starts automatically and restart
 
 ```
 mkdir -p ~/.config/systemd/user
-cp note-sorter.service ~/.config/systemd/user/
+cp ~/note-sorter/note-sorter.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now note-sorter
 loginctl enable-linger
 ```
 
-`enable-linger` makes it (and the Podman containers) start at boot, even before you log in.
+`enable-linger` makes it and the Podman containers start at boot, even before you log in.
 
-Useful commands:
+### 6. View it from your phone (Tailscale)
 
-- `systemctl --user restart note-sorter`: apply changes after editing `sorter.py`
-- `journalctl --user -u note-sorter -f`: watch it receive and sort items live
-
-## Settings
-
-All settings are optional environment variables:
-
-| Variable     | Default                   | What it does                                 |
-| ------------ | ------------------------- | -------------------------------------------- |
-| `MODEL`      | `qwen3.5`                 | Any Ollama model                             |
-| `OLLAMA`     | `http://127.0.0.1:11434`  | Ollama address                               |
-| `SIGNAL_API` | `http://127.0.0.1:8080`   | signal-cli REST API address                  |
-| `DB_PATH`    | `~/note-sorter/notes.db`  | Where your items are stored                  |
-| `WEB_HOST`   | `127.0.0.1`               | Viewer bind address (see below)              |
-| `WEB_PORT`   | `8765`                    | Viewer port                                  |
-| `SEND_REPLY` | `1`                       | Set to `0` to turn off the `→ Tab` replies   |
-
-The starter tabs are set in `STARTER_TABS` near the top of `sorter.py`.
-
-## Viewing from your phone
-
-The viewer only listens on `127.0.0.1` by default and has **no login**. Don't expose it to the public internet. To use it from your phone, use Tailscale:
+The viewer only listens on `127.0.0.1` by default and has **no login**. Don't expose it to the public internet. Tailscale gives your devices a private, encrypted network instead:
 
 1. Run `sudo systemctl enable --now tailscaled`, then `sudo tailscale up`, and sign in.
 2. Install the Tailscale app on your phone and sign in to the same account.
 3. Get the PC's address with `tailscale ip -4`.
 4. In `~/.config/systemd/user/note-sorter.service`, set `WEB_HOST=` to that address, then run `systemctl --user daemon-reload && systemctl --user restart note-sorter`.
-5. On your phone, open `http://<that address>:8765` and use your browser's **Add to Home screen**.
+5. On your phone, open `http://<that address>:8765` and add it to your home screen. In Samsung Internet that's **≡ → Add page to → Home screen**. In Chrome it's **⋮ → Add to home screen**. In Safari it's **Share → Add to Home Screen**.
 
 Browsers may warn that the page isn't HTTPS. Tailscale already encrypts the connection, so it's safe to continue.
 
-## Your data
+## Everyday use
 
-Everything you send is stored in `notes.db`, a SQLite file. It's listed in `.gitignore`. Never commit it.
+| To do this…                         | Run                                        |
+| ----------------------------------- | ------------------------------------------ |
+| Apply changes after editing the code | `systemctl --user restart note-sorter`     |
+| Watch items arrive and get sorted   | `journalctl --user -u note-sorter -f`      |
+| Stop / start the sorter             | `systemctl --user stop note-sorter` / `start` |
+
+## Customizing
+
+### Starter tabs
+
+Set `STARTER_TABS` near the top of `sorter.py`. On every restart, the sorter:
+
+- adds any tab in the list that doesn't exist yet
+- fixes capitalization to match the list, so "To-do" becomes "To-Do"
+- removes tabs that aren't in the list **and** have no items
+
+Tabs that still have items, including archived ones, are never removed. Use **Rename or merge** in the viewer to retire them.
+
+### Settings
+
+All settings are optional environment variables, which you set in the service file:
+
+| Variable     | Default                   | What it does                                 |
+| ------------ | ------------------------- | -------------------------------------------- |
+| `MODEL`      | `qwen3.5`                 | Any Ollama model (a vision model lets it read images) |
+| `OLLAMA`     | `http://127.0.0.1:11434`  | Ollama address                               |
+| `SIGNAL_API` | `http://127.0.0.1:8080`   | signal-cli REST API address                  |
+| `DB_PATH`    | `~/note-sorter/notes.db`  | Where items are stored. `thumbs/` sits beside it. |
+| `WEB_HOST`   | `127.0.0.1`               | Viewer bind address (see step 6)             |
+| `WEB_PORT`   | `8765`                    | Viewer port                                  |
+| `SEND_REPLY` | `1`                       | Set to `0` to turn off the `→ Tab` replies   |
+
+## Your data and privacy
+
+- **Stored locally:** everything you send is in `notes.db`, a SQLite file, and the images are in `thumbs/`. Both are in `.gitignore`. Never commit them.
+- **Signal:** the container links as an extra device, so it receives all your Signal messages. The sorter ignores everything except Note to Self, and nothing leaves your machine.
+- **Outbound requests:** to fetch titles and images, your PC visits the links you save, just as if you'd opened them. For book links, it sends the ISBN to Open Library. Nothing else is sent anywhere.
+
+### Database schema
+
+Two tables: `tabs(name PRIMARY KEY COLLATE NOCASE, created)` and `items(id, sig_ts UNIQUE, created, text, url, title, descr, tab, forced_tab, done, thumb)`. `items.tab` holds the tab's name. New items are inserted with `tab = NULL` and picked up by the sort loop. `done = 1` means archived. Older databases get the `thumb` column added automatically on startup.
 
 ## License
 
