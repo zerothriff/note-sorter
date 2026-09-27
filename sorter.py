@@ -33,6 +33,8 @@ STARTER_TABS = ["To-Do","Recipes", "Music", "Books", "Movies & TV", "Links", "Id
 REPLY_PREFIX = "→ "
 THUMB_DIR = os.path.join(os.path.dirname(DB_PATH), "thumbs")   # saved images
 MAX_IMAGE_BYTES = 8_000_000
+OPENLIBRARY = "https://openlibrary.org"          # free book database for covers
+OPENLIBRARY_COVERS = "https://covers.openlibrary.org"
 IMAGE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
 
 URL_RE = re.compile(r"https?://[^\s<>\"]+")
@@ -142,12 +144,56 @@ def download_image(url):
     return data, ctype
 
 
+# ---------------------------------------------------------------- books
+ISBN13_RE = re.compile(r"(?<![0-9])(97[89][0-9]{10})(?![0-9])")
+ISBN10_RE = re.compile(r"/(?:dp|gp/product|isbn|ISBN)/([0-9]{9}[0-9Xx])(?![0-9A-Za-z])")
+
+
+def find_isbn(url):
+    """Finds a valid ISBN in a link (bookstores, Amazon /dp/ links, etc.)."""
+    for m in ISBN13_RE.finditer(url):
+        d = m.group(1)
+        if sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(d)) % 10 == 0:
+            return d
+    m = ISBN10_RE.search(url)
+    if m:
+        d = m.group(1).upper()
+        if sum((10 - i) * (10 if c == "X" else int(c)) for i, c in enumerate(d)) % 11 == 0:
+            return d
+    return None
+
+
+def book_info(isbn):
+    """Title and cover from Open Library: (title, image_bytes, content_type)."""
+    title = ""
+    try:
+        book = http_json("GET", f"{OPENLIBRARY}/isbn/{isbn}.json", timeout=10) or {}
+        title = (book.get("title") or "")[:200]
+    except Exception:
+        pass
+    data, ctype = download_image(f"{OPENLIBRARY_COVERS}/b/isbn/{isbn}-L.jpg?default=false")
+    return title, data, ctype
+
+
 def save_thumb(data, ctype, key):
     """Saves image bytes into THUMB_DIR; returns the file name."""
     name = f"{key}.{IMAGE_EXT.get(ctype, 'jpg')}"
     with open(os.path.join(THUMB_DIR, name), "wb") as f:
         f.write(data)
     return name
+
+
+def fetch_attachment(att, key):
+    """Downloads a Signal attachment (your image, or Signal's link preview image)."""
+    try:
+        req = urllib.request.Request(
+            f"{SIGNAL_API}/v1/attachments/{urllib.parse.quote(att['id'])}")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read(MAX_IMAGE_BYTES)
+        return save_thumb(data, (att.get("contentType") or "image/jpeg").lower(), key)
+    except Exception as e:
+        print("  couldn't fetch attachment:", e, flush=True)
+        return None
 
 
 def clean_tab(name):
@@ -236,16 +282,24 @@ def fetch_new(acct):
         url = url_m.group(0).rstrip(").,") if url_m else None
         title, descr, image_url = link_info(url) if url else ("", "", "")
 
+        # the preview card the Signal app built on your phone, if any
+        pv = next((p for p in sent.get("previews") or [] if p), None) or {}
+        title = title or (pv.get("title") or "")[:200]
+        descr = descr or (pv.get("description") or "")[:300]
+
+        # pick an image, best source first
         thumb = None
-        if att:        # an image you sent: fetch it from signal-cli
-            try:
-                req = urllib.request.Request(
-                    f"{SIGNAL_API}/v1/attachments/{urllib.parse.quote(att['id'])}")
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    thumb = save_thumb(r.read(MAX_IMAGE_BYTES), att["contentType"].lower(), key)
-            except Exception as e:
-                print("  couldn't fetch attachment:", e, flush=True)
-        elif image_url:  # a link's preview image
+        if att:                                   # 1. an image you sent
+            thumb = fetch_attachment(att, key)
+        if not thumb and (pv.get("image") or {}).get("id"):
+            thumb = fetch_attachment(pv["image"], key)   # 2. Signal's preview
+        isbn = find_isbn(url) if url else None
+        if isbn and (not thumb or not title):     # 3. book cover by ISBN
+            btitle, data, ctype = book_info(isbn)
+            title = title or btitle
+            if data and not thumb:
+                thumb = save_thumb(data, ctype, key)
+        if not thumb and image_url:               # 4. the site's own preview image
             data, ctype = download_image(image_url)
             if data:
                 thumb = save_thumb(data, ctype, key)
