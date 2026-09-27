@@ -226,8 +226,9 @@ nav a{white-space:nowrap;text-decoration:none;color:var(--fg);background:var(--c
  border-radius:999px;padding:6px 12px;font-size:14px}
 nav a.on{background:var(--accent);border-color:var(--accent);color:#fff}
 nav .n{opacity:.7;margin-left:4px}
-main{max-width:720px;margin:0 auto;padding:16px}
-.item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+main{max-width:1400px;margin:0 auto;padding:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-items:start}
+.item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:0}
 .text{word-break:break-word}.text a{color:var(--accent)}
 .title{color:var(--muted);font-size:14px;margin-top:4px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
@@ -285,7 +286,7 @@ def render(tab):
                        f'<input type="hidden" name="back" value="{back}"><button>✓ Done</button></form>')
         cards.append(f'<div class="item"><div class="text">{linkify(it["text"])}</div>{title}'
                      f'<div class="row"><span class="when">{when}</span>{actions}</div></div>')
-    body = "".join(cards) or '<div class="empty">Nothing here.</div>'
+    body = f'<div class="grid">{"".join(cards)}</div>' if cards else '<div class="empty">Nothing here.</div>'
 
     tools = ""
     if not done_view and tab != "Inbox":
