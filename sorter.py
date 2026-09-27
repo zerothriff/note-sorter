@@ -362,7 +362,7 @@ nav .n{opacity:.7;margin-left:4px}
 main{max-width:1400px;margin:0 auto;padding:16px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-items:start}
 .item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:0;overflow:hidden}
-.thumb{display:block;width:calc(100% + 28px);height:180px;object-fit:cover;margin:-12px -14px 12px;background:var(--line)}
+.thumb{display:block;width:calc(100% + 28px);height:auto;max-height:480px;object-fit:contain;margin:-12px -14px 12px;background:var(--line)}
 .text{word-break:break-word}.text a{color:var(--accent)}
 .title{color:var(--muted);font-size:14px;margin-top:4px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
@@ -384,9 +384,17 @@ def esc(s):
     return html.escape(str(s or ""), quote=True)
 
 
+LINK_TEXT_MAX = 75   # long links are shortened on screen but still open in full
+
+
 def linkify(s):
-    return URL_RE.sub(lambda m: f'<a href="{m.group(0)}" target="_blank" rel="noopener">{m.group(0)}</a>',
-                      esc(s))
+    def short(m):
+        url = m.group(0)
+        shown = html.unescape(url)
+        if len(shown) > LINK_TEXT_MAX:
+            shown = shown[:LINK_TEXT_MAX] + "…"
+        return f'<a href="{url}" target="_blank" rel="noopener" title="{url}">{esc(shown)}</a>'
+    return URL_RE.sub(short, esc(s))
 
 
 def render(tab):
