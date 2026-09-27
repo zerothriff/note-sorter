@@ -83,6 +83,25 @@ python3 ~/note-sorter/sorter.py
 
 Open `http://127.0.0.1:8765` and send something to Note to Self.
 
+### 5. Run at boot
+
+Install the included service file so the sorter starts automatically and restarts if it crashes:
+
+```
+mkdir -p ~/.config/systemd/user
+cp note-sorter.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now note-sorter
+loginctl enable-linger
+```
+
+`enable-linger` makes it (and the Podman containers) start at boot, even before you log in.
+
+Useful commands:
+
+- `systemctl --user restart note-sorter`: apply changes after editing `sorter.py`
+- `journalctl --user -u note-sorter -f`: watch it receive and sort items live
+
 ## Settings
 
 All settings are optional environment variables:
@@ -101,7 +120,15 @@ The starter tabs are set in `STARTER_TABS` near the top of `sorter.py`.
 
 ## Viewing from your phone
 
-The viewer only listens on `127.0.0.1` by default and has **no login**. Don't expose it to the internet. To reach it from your phone, a private network like Tailscale is the safe option. Run the sorter with `WEB_HOST` set to the machine's Tailscale IP.
+The viewer only listens on `127.0.0.1` by default and has **no login**. Don't expose it to the public internet. To use it from your phone, use Tailscale:
+
+1. Run `sudo systemctl enable --now tailscaled`, then `sudo tailscale up`, and sign in.
+2. Install the Tailscale app on your phone and sign in to the same account.
+3. Get the PC's address with `tailscale ip -4`.
+4. In `~/.config/systemd/user/note-sorter.service`, set `WEB_HOST=` to that address, then run `systemctl --user daemon-reload && systemctl --user restart note-sorter`.
+5. On your phone, open `http://<that address>:8765` and use your browser's **Add to Home screen**.
+
+Browsers may warn that the page isn't HTTPS. Tailscale already encrypts the connection, so it's safe to continue.
 
 ## Your data
 
